@@ -889,19 +889,18 @@ def read_messages(
     # advancing past records nobody can read any more, or an expired room would reuse seqs.
     cutoff = _cutoff(room)
     out: list[dict] = []
-    if path.exists():
-        with path.open("rb") as f:
-            for raw in reverse_lines(f):
-                rec = _parse(raw)
-                if rec is None:
-                    continue
-                if since is not None and rec["seq"] <= since:
-                    break
-                if cutoff is not None and _expired(rec, cutoff):
-                    break
-                out.append(rec)
-                if len(out) >= limit:
-                    break
+    with suppress(FileNotFoundError), path.open("rb") as f:
+        for raw in reverse_lines(f):
+            rec = _parse(raw)
+            if rec is None:
+                continue
+            if since is not None and rec["seq"] <= since:
+                break
+            if cutoff is not None and _expired(rec, cutoff):
+                break
+            out.append(rec)
+            if len(out) >= limit:
+                break
     out.reverse()
     return {
         "room": room,
@@ -1161,18 +1160,17 @@ def _set_seq_entry(root: Path, room: str, floor: int | None) -> None:
 
 def last_seq(root: Path, room: str) -> int:
     path = room_path(root, room)
-    if path.exists():
-        with path.open("rb") as f:
-            # chunk_size 4 KiB, not the 64 KiB default: this runs under the room lock on
-            # every append and wants exactly one record — the newest. A typical record is
-            # ~120 B, so 4 KiB holds ~34 of them and the first read almost always answers.
-            # reverse_lines loops until it has a complete line, so a room of long records
-            # simply reads again; nothing is lost, and the common case stops reading 60 KiB
-            # it only ever split and threw away.
-            for raw in reverse_lines(f, chunk_size=4096, max_bytes=65536):
-                rec = _parse(raw)
-                if rec is not None:
-                    return rec["seq"]
+    with suppress(FileNotFoundError), path.open("rb") as f:
+        # chunk_size 4 KiB, not the 64 KiB default: this runs under the room lock on
+        # every append and wants exactly one record — the newest. A typical record is
+        # ~120 B, so 4 KiB holds ~34 of them and the first read almost always answers.
+        # reverse_lines loops until it has a complete line, so a room of long records
+        # simply reads again; nothing is lost, and the common case stops reading 60 KiB
+        # it only ever split and threw away.
+        for raw in reverse_lines(f, chunk_size=4096, max_bytes=65536):
+            rec = _parse(raw)
+            if rec is not None:
+                return rec["seq"]
         return 0
     # The room file is gone (reaped). A recreated room carries the previous generation's
     # high-water mark in a root-level floor map so cursors from the old generation keep
@@ -1220,17 +1218,16 @@ def room_window(root: Path, room: str) -> tuple[int, list[str]]:
     nicks: list[str] = []
     top = 0
     path = room_path(root, room)
-    if path.exists():
-        with path.open("rb") as f:
-            for raw in reverse_lines(f, max_bytes=WINDOW_BYTES):
-                rec = _parse(raw)
-                if rec is None:
-                    continue
-                if not nicks:
-                    top = rec["seq"]
-                nicks.append(str(rec.get("from", "")))
-                if len(nicks) >= WINDOW_MESSAGES:
-                    break
+    with suppress(FileNotFoundError), path.open("rb") as f:
+        for raw in reverse_lines(f, max_bytes=WINDOW_BYTES):
+            rec = _parse(raw)
+            if rec is None:
+                continue
+            if not nicks:
+                top = rec["seq"]
+            nicks.append(str(rec.get("from", "")))
+            if len(nicks) >= WINDOW_MESSAGES:
+                break
     return top, nicks
 
 
@@ -2784,8 +2781,9 @@ def note_set(
 
 
 def note_get(root: Path, ns: str, key: str) -> str | None:
-    path = note_path(root, ns, key)
-    return path.read_text(encoding="utf-8") if path.exists() else None
+    with suppress(FileNotFoundError):
+        return note_path(root, ns, key).read_text(encoding="utf-8")
+    return None
 
 
 def topic(root: Path, room: str) -> str | None:
