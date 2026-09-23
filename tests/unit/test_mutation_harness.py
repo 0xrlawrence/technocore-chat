@@ -41,9 +41,13 @@ def test_every_root_path_the_mutation_suite_reads_is_copied_into_the_tree():
         for f in sorted(target.rglob("*.py")) if target.is_dir() else [target]:
             if str(f.relative_to(ROOT)) in ignored:
                 continue
-            for name in _ROOT_READ.findall(f.read_text(encoding="utf-8")):
-                if name not in copied:
-                    missing.setdefault(name, set()).add(str(f.relative_to(ROOT)))
+            for line in f.read_text(encoding="utf-8").splitlines():
+                # Absence can be part of the contract too; such a path is not an input.
+                if "assert not " in line and ".exists()" in line:
+                    continue
+                for name in _ROOT_READ.findall(line):
+                    if name not in copied:
+                        missing.setdefault(name, set()).add(str(f.relative_to(ROOT)))
 
     assert not missing, (
         "read from the repo root by the mutation suite, but absent from "
